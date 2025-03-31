@@ -1,0 +1,58 @@
+// Macro to measure mean values of the red channel for ROIs in TIFF files
+// and save the results in an Excel-compatible CSV file.
+
+run("Clear Results");
+dir = getDirectory("Choose an Input Directory");
+outputFile = File.openDialog("Save output CSV file");
+
+// Prepare CSV output
+header = "File Name, ROI Index, Mean Value\n";
+File.append(header, outputFile);
+
+// Get the list of files in the directory
+list = getFileList(dir);
+
+// Iterate through the files in the directory
+for (i = 0; i < list.length; i++) {
+    if (endsWith(list[i], ".tif")) {
+        tiffFile = list[i];
+        zipFile = replace(tiffFile, ".tif", ".zip");
+        tiffPath = dir + tiffFile;
+        zipPath = dir + zipFile;
+        
+        // Check if the corresponding ROI ZIP file exists
+        if (!File.exists(zipPath)) {
+            print("Warning: No ROI file found for " + tiffFile);
+            continue;
+        }
+        
+        // Open the TIFF file
+        open(tiffPath);
+        
+        // Split channels and select the red channel
+        run("Split Channels");
+        selectWindow(tiffFile + " (red)");
+        
+        // Open the ROI file
+        run("Open...", "path=[" + zipPath + "]");
+        
+        // Measure mean values for the ROIs
+        roiManager("Measure");
+        roiCount = roiManager("count");
+        
+        // Save the results to the CSV file
+        for (j = 0; j < roiCount; j++) {
+            roiManager("Select", j);
+            meanValue = getResult("Mean", j);
+            line = tiffFile + "," + (j + 1) + "," + meanValue + "\n";
+            File.append(line, outputFile);
+        }
+        
+        // Close all images and reset ROI Manager
+        roiManager("Deselect");
+        roiManager("Delete");
+        close("*");
+    }
+}
+
+print("Analysis complete. Results saved to: " + outputFile);
