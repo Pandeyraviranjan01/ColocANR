@@ -1,0 +1,127 @@
+// Macro to measure and normalize mean intensity values of green channel for cell ROIs in TIFF files
+// This normalizes intensity values to account for different cell areas
+
+// Clear any previous results and ROIs
+run("Clear Results");
+roiManager("Reset");
+
+// Get input directory and output file
+dir = getDirectory("Choose an Input Directory");
+outputFile = File.openDialog("Save output CSV file");
+
+// Prepare CSV output with more comprehensive headers
+header = "File Name,Cell Index,Area (px²),Mean Green Intensity,Integrated Density,Normalized Intensity,Normalization Factor\n";
+File.append(header, outputFile);
+
+// Get the list of files in the directory
+list = getFileList(dir);
+
+// Track total cells for final report
+totalCellsAnalyzed = 0;
+
+// Iterate through the files in the directory
+for (i = 0; i < list.length; i++) {
+    if (endsWith(list[i], ".tif") || endsWith(list[i], ".tiff")) {
+        tiffFile = list[i];
+        zipFile = replace(tiffFile, ".tif", ".zip");
+        // Also check for .tiff extension
+        if (!File.exists(dir + zipFile)) {
+            zipFile = replace(tiffFile, ".tiff", ".zip");
+        }
+        
+        tiffPath = dir + tiffFile;
+        zipPath = dir + zipFile;
+        
+        // Check if the corresponding ROI ZIP file exists
+        if (!File.exists(zipPath)) {
+            print("Warning: No ROI file found for " + tiffFile);
+            continue;
+        }
+        
+        // Open the TIFF file
+        open(tiffPath);
+        imageName = getTitle();
+        
+        // Get green channel
+        if (bitDepth() == 24) {
+            // For RGB images, split channels
+            run("Split Channels");
+            // Select the green channel (channel 2)
+            selectWindow(imageName + " (green)");
+            greenChannel = getImageID();
+        } else {
+            // For multi-channel images
+            getDimensions(width, height, channels, slices, frames);
+            if (channels > 1) {
+                // If it's a composite image with multiple channels
+                run("Split Channels");
+                // Select the green channel (channel 2)
+                selectWindow("C2-" + imageName);
+                greenChannel = getImageID();
+            } else {
+                // Single channel image - assume it's the channel we want
+                greenChannel = getImageID();
+            }
+        }
+        
+        // Open the ROI file
+        roiManager("Reset"); // Clear any existing ROIs
+        roiManager("Open", zipPath);
+        
+        // Measure mean values and areas for the cell ROIs
+        run("Set Measurements...", "area mean integrated redirect=None decimal=3");
+        selectImage(greenChannel);
+        roiManager("Measure");
+        roiCount = roiManager("count");
+        
+        // Calculate a standard reference area (using the median cell area)
+        // Median is often better than mean for biological samples
+        areas = newArray(roiCount);
+        for (j = 0; j < roiCount; j++) {
+            areas[j] = getResult("Area", j);
+        }
+        Array.sort(areas);
+        
+        // Calculate median area
+        if (roiCount % 2 == 0) {
+            standardArea = (areas[roiCount/2-1] + areas[roiCount/2])/2;
+        } else {
+            standardArea = areas[floor(roiCount/2)];
+        }
+        
+        // Save the results to the CSV file
+        for (j = 0; j < roiCount; j++) {
+            cellArea = getResult("Area", j);
+            meanIntensity = getResult("Mean", j);
+            integratedDensity = getResult("IntDen", j);
+            
+            // Calculate normalization factor
+            normFactor = standardArea / cellArea;
+            
+            // Calculate normalized intensity
+            normalizedIntensity = meanIntensity * normFactor;
+            
+            // Write results to CSV
+            line = imageName + "," + (j + 1) + "," + cellArea + "," + meanIntensity + "," 
+                   + integratedDensity + "," + normalizedIntensity + "," + normFactor + "\n";
+            File.append(line, outputFile);
+            
+            totalCellsAnalyzed++;
+        }
+        
+        // Close all images and reset ROI Manager
+        run("Close All");
+        roiManager("Reset");
+        
+        showProgress(i / list.length);
+    }
+}
+
+// Print summary
+print("Analysis complete!");
+print("Total files processed: " + i);
+print("Total cells analyzed: " + totalCellsAnalyzed);
+print("Results saved to: " + outputFile);
+print("Normalized values represent intensity as if all cells had the same area (" + standardArea + " px²).");
+print("Normalization used median cell area as reference standard.");
+print("Time: " + timeStamp());
